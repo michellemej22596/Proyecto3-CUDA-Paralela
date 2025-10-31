@@ -1,0 +1,31 @@
+# Archivos compilados
+*.o
+*.out
+*.exe
+bin/
+build/
+
+# Archivos de CUDA
+*.ptx
+*.cubin
+*.fatbin
+
+# Archivos de profiling
+*.nvvp
+*.qdrep
+*.sqlite
+
+# Archivos temporales
+*.tmp
+*.swp
+*~
+.DS_Store
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Archivos de sistema
+Thumbs.db
+.directory
