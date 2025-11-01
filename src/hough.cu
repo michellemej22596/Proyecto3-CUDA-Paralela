@@ -9,39 +9,62 @@
  To build use  : make
  ============================================================================
  */
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <cuda.h>
+#include <string.h>
+#include "common/pgm.h"
+
+const int degreeInc = 2;
+const int degreeBins = 180 / degreeInc;
+const int rBins = 100;
+const float radInc = degreeInc * M_PI / 180;
+
+#define degreeBins 180
+#define rBins 100
+#define radInc (M_PI / degreeBins)
+
+__constant__ float d_Cos[degreeBins];
+__constant__ float d_Sin[degreeBins];
+
 // GPU kernel. One thread per image pixel is spawned.
 // The accummulator memory needs to be allocated by the host in global memory
-__global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin)
+__global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float rMax, float rScale)
 {
+  int locID = threadIdx.x;
   int gloID = blockIdx.x * blockDim.x + threadIdx.x;
   if (gloID >= w * h) return;      // in case of extra threads in block
 
   int xCent = w / 2;
   int yCent = h / 2;
 
+  __shared__ int localAcc[degreeBins * rBins];
+
+  for(int i = locID; i < degreeBins * rBins; i += blockDim.x) {
+    localAcc[i] = 0;
+  }
+  __syncthreads(); // Barrier 1: Ensure all threads finish initialization
+
   //TODO explicar bien bien esta parte. Dibujar un rectangulo a modo de imagen sirve para visualizarlo mejor
   int xCoord = gloID % w - xCent;
   int yCoord = yCent - gloID / w;
-
-  //TODO eventualmente usar memoria compartida para el acumulador
 
   if (pic[gloID] > 0)
     {
       for (int tIdx = 0; tIdx < degreeBins; tIdx++)
         {
-          //TODO utilizar memoria constante para senos y cosenos
-          //float r = xCoord * cos(tIdx) + yCoord * sin(tIdx); //probar con esto para ver diferencia en tiempo
           float r = xCoord * d_Cos[tIdx] + yCoord * d_Sin[tIdx];
           int rIdx = (r + rMax) / rScale;
-          //debemos usar atomic, pero que race condition hay si somos un thread por pixel? explique
-          atomicAdd (acc + (rIdx * degreeBins + tIdx), 1);
+          atomicAdd (&localAcc[rIdx * degreeBins + tIdx], 1);
         }
     }
 
-  //TODO eventualmente cuando se tenga memoria compartida, copiar del local al global
-  //utilizar operaciones atomicas para seguridad
-  //faltara sincronizar los hilos del bloque en algunos lados
+  __syncthreads();
 
+  for(int i = locID; i < degreeBins * rBins; i += blockDim.x) {
+    atomicAdd(&acc[i], localAcc[i]);
+  }
 }
 
 //*****************************************************************
@@ -59,11 +82,11 @@ int main (int argc, char **argv)
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 
-  float* d_Cos;
-  float* d_Sin;
+  // float* d_Cos;
+  // float* d_Sin;
 
-  cudaMalloc ((void **) &d_Cos, sizeof (float) * degreeBins);
-  cudaMalloc ((void **) &d_Sin, sizeof (float) * degreeBins);
+  // cudaMalloc ((void **) &d_Cos, sizeof (float) * degreeBins);
+  // cudaMalloc ((void **) &d_Sin, sizeof (float) * degreeBins);
 
   // CPU calculation
   CPU_HoughTran(inImg.pixels, w, h, &cpuht);
@@ -82,9 +105,8 @@ int main (int argc, char **argv)
   float rMax = sqrt (1.0 * w * w + 1.0 * h * h) / 2;
   float rScale = 2 * rMax / rBins;
 
-  // TODO eventualmente volver memoria global
-  cudaMemcpy(d_Cos, pcCos, sizeof (float) * degreeBins, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_Sin, pcSin, sizeof (float) * degreeBins, cudaMemcpyHostToDevice);
+  cudaMemcpyToSymbol(d_Cos, pcCos, sizeof (float) * degreeBins);
+  cudaMemcpyToSymbol(d_Sin, pcSin, sizeof (float) * degreeBins);
 
   // setup and copy data from host to device
   unsigned char *d_in, *h_in;
@@ -104,7 +126,7 @@ int main (int argc, char **argv)
   int blockNum = ceil (w * h / 256.0);
   
   cudaEventRecord(start);
-  GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
+  GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   
@@ -126,8 +148,8 @@ int main (int argc, char **argv)
   // Free device memory
   cudaFree(d_in);
   cudaFree(d_hough);
-  cudaFree(d_Cos);
-  cudaFree(d_Sin);
+  // cudaFree(d_Cos);
+  // cudaFree(d_Sin);
   
   // Free host memory
   free(h_hough);
