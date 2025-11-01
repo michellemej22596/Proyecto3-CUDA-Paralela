@@ -9,73 +9,12 @@
  To build use  : make
  ============================================================================
  */
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <cuda.h>
-#include <string.h>
-#include "common/pgm.h"
-
-const int degreeInc = 2;
-const int degreeBins = 180 / degreeInc;
-const int rBins = 100;
-const float radInc = degreeInc * M_PI / 180;
-//*****************************************************************
-// The CPU function returns a pointer to the accummulator
-void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc)
-{
-  float rMax = sqrt (1.0 * w * w + 1.0 * h * h) / 2;  //(w^2 + h^2)/2, radio max equivalente a centro -> esquina
-  *acc = new int[rBins * degreeBins];            //el acumulador, conteo depixeles encontrados, 90*180/degInc = 9000
-  memset (*acc, 0, sizeof (int) * rBins * degreeBins); //init en ceros
-  int xCent = w / 2;
-  int yCent = h / 2;
-  float rScale = 2 * rMax / rBins;
-
-  for (int i = 0; i < w; i++) //por cada pixel
-    for (int j = 0; j < h; j++) //...
-      {
-        int idx = j * w + i;
-        if (pic[idx] > 0) //si pasa thresh, entonces lo marca
-          {
-            int xCoord = i - xCent;
-            int yCoord = yCent - j;  // y-coord has to be reversed
-            float theta = 0;         // actual angle
-            for (int tIdx = 0; tIdx < degreeBins; tIdx++) //add 1 to all lines in that pixel
-              {
-                float r = xCoord * cos (theta) + yCoord * sin (theta);
-                int rIdx = (r + rMax) / rScale;
-                (*acc)[rIdx * degreeBins + tIdx]++; //+1 para este radio r y este theta
-                theta += radInc;
-              }
-          }
-      }
-}
-
-//*****************************************************************
-// TODO usar memoria constante para la tabla de senos y cosenos
-// inicializarlo en main y pasarlo al device
-//__constant__ float d_Cos[degreeBins];
-//__constant__ float d_Sin[degreeBins];
-
-//*****************************************************************
-//TODO Kernel memoria compartida
-// __global__ void GPU_HoughTranShared(...)
-// {
-//   //TODO
-// }
-//TODO Kernel memoria Constante
-// __global__ void GPU_HoughTranConst(...)
-// {
-//   //TODO
-// }
-
 // GPU kernel. One thread per image pixel is spawned.
 // The accummulator memory needs to be allocated by the host in global memory
 __global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin)
 {
-  //TODO calcular: int gloID = ?
-  int gloID = w * h + 1; //TODO
-  if (gloID > w * h) return;      // in case of extra threads in block
+  int gloID = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gloID >= w * h) return;      // in case of extra threads in block
 
   int xCent = w / 2;
   int yCent = h / 2;
@@ -115,6 +54,10 @@ int main (int argc, char **argv)
   int *cpuht;
   int w = inImg.x_dim;
   int h = inImg.y_dim;
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
 
   float* d_Cos;
   float* d_Sin;
@@ -158,8 +101,16 @@ int main (int argc, char **argv)
 
   // execution configuration uses a 1-D grid of 1-D blocks, each made of 256 threads
   //1 thread por pixel
-  int blockNum = ceil (w * h / 256);
+  int blockNum = ceil (w * h / 256.0);
+  
+  cudaEventRecord(start);
   GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  printf("GPU Kernel Execution Time: %.3f ms\n", milliseconds);
 
   // get results from device
   cudaMemcpy (h_hough, d_hough, sizeof (int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
@@ -172,7 +123,21 @@ int main (int argc, char **argv)
   }
   printf("Done!\n");
 
-  // TODO clean-up
+  // Free device memory
+  cudaFree(d_in);
+  cudaFree(d_hough);
+  cudaFree(d_Cos);
+  cudaFree(d_Sin);
+  
+  // Free host memory
+  free(h_hough);
+  delete[] cpuht;
+  free(pcCos);
+  free(pcSin);
+  
+  // Destroy CUDA events
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
 
   return 0;
 }
