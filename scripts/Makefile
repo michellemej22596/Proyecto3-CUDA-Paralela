@@ -1,7 +1,18 @@
-all: pgm.o	hough
+NVCC = nvcc
 
-hough:	hough.cu pgm.o
-	nvcc hough.cu pgm.o -o hough
+# Source files
+SRCS = ../src/main.cu ../src/hough.cu ../src/image_utils.cpp
 
-pgm.o:	common/pgm.cpp
-	g++ -c common/pgm.cpp -o ./pgm.o
+# Output binary
+TARGET = hough
+
+# Compiler flags
+NVCC_FLAGS = -O2 -I../src
+
+all: $(TARGET)
+
+$(TARGET): $(SRCS)
+	$(NVCC) $(SRCS) -o $(TARGET) $(NVCC_FLAGS)
+
+clean:
+	rm -f $(TARGET)
