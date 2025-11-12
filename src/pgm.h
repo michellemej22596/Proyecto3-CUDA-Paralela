@@ -12,7 +12,7 @@ typedef struct {
     unsigned char *data;
 } PGMImage;
 
-// Leer imagen PGM
+// Leer imagen PGM (formato binario P5)
 PGMImage* readPGM(const char *filename) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
@@ -22,17 +22,17 @@ PGMImage* readPGM(const char *filename) {
 
     PGMImage *img = (PGMImage*)malloc(sizeof(PGMImage));
     char magic[3];
-    
-    // Leer magic number (P5 para PGM binario)
-    fscanf(fp, "%s", magic);
+
+    // Leer encabezado PGM (debe ser "P5")
+    fscanf(fp, "%2s", magic);
     if (strcmp(magic, "P5") != 0) {
-        printf("Error: Formato no soportado (debe ser P5)\n");
+        printf("Error: Formato no soportado (se requiere P5)\n");
         fclose(fp);
         free(img);
         return NULL;
     }
 
-    // Saltar comentarios
+    // Saltar posibles líneas de comentario
     char c = getc(fp);
     while (c == '#') {
         while (getc(fp) != '\n');
@@ -40,21 +40,22 @@ PGMImage* readPGM(const char *filename) {
     }
     ungetc(c, fp);
 
-    // Leer dimensiones y valor máximo
+    // Leer tamaño y valor máximo
     fscanf(fp, "%d %d %d", &img->width, &img->height, &img->max_gray);
-    fgetc(fp); // Saltar newline
+    fgetc(fp); // Leer el salto de línea pendiente
 
-    // Leer datos de la imagen
     int size = img->width * img->height;
     img->data = (unsigned char*)malloc(size);
+
+    // Leer los valores de la imagen (mapa de intensidades)
     fread(img->data, 1, size, fp);
 
     fclose(fp);
     return img;
 }
 
-// Escribir imagen PGM
-void writePGM(const char *filename, PGMImage *img) {
+// Escribir imagen PGM (binario P5)
+void writePGM(const char *filename, const PGMImage *img) {
     FILE *fp = fopen(filename, "wb");
     if (!fp) {
         printf("Error: No se pudo crear el archivo %s\n", filename);
@@ -69,21 +70,23 @@ void writePGM(const char *filename, PGMImage *img) {
     fclose(fp);
 }
 
-// Liberar memoria de la imagen
+// Liberar imagen de memoria
 void freePGM(PGMImage *img) {
     if (img) {
-        if (img->data) free(img->data);
+        if (img->data) {
+            free(img->data);
+        }
         free(img);
     }
 }
 
-// Crear imagen PGM vacía
+// Crear una imagen vacía (inicializada en negro)
 PGMImage* createPGM(int width, int height) {
     PGMImage *img = (PGMImage*)malloc(sizeof(PGMImage));
     img->width = width;
     img->height = height;
     img->max_gray = 255;
-    img->data = (unsigned char*)calloc(width * height, 1);
+    img->data = (unsigned char*)calloc(width * height, 1); // imagen negra
     return img;
 }
 

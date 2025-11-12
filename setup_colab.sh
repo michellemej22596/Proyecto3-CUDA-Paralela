@@ -1,50 +1,71 @@
 #!/bin/bash
-# Script para configurar el proyecto en Google Colab
+# ============================================================
+# Configuración automática para Google Colab
+# ============================================================
 
-echo "=== Configurando proyecto Hough Transform ==="
+echo "=== Configurando entorno CUDA para Transformada de Hough ==="
 
-# Crear estructura de directorios
-mkdir -p common
-mkdir -p images
+# Verificar si CUDA está disponible
+if ! command -v nvcc &> /dev/null; then
+    echo "Instalando CUDA toolkit..."
+    apt-get update -y && apt-get install -y cuda-toolkit-12-1
+else
+    echo "CUDA toolkit ya instalado."
+fi
 
-# Crear imagen de prueba simple en formato PGM
+# Crear estructura de carpetas
+mkdir -p src build images
+
+# Crear imagen de prueba sintética
+echo "Generando imagen de prueba (images/test.pgm)..."
 cat > images/test.pgm << 'EOF'
 P5
 256 256
 255
 EOF
 
-# Generar datos de imagen (línea horizontal en el medio)
 python3 << 'PYTHON'
 import struct
-
-width = 256
-height = 256
+width, height = 256, 256
 data = bytearray(width * height)
-
-# Línea horizontal en y=128
 for x in range(width):
     data[128 * width + x] = 255
-
-# Línea vertical en x=128
 for y in range(height):
     data[y * width + 128] = 255
-
-# Línea diagonal
 for i in range(min(width, height)):
     data[i * width + i] = 255
-
-with open('images/test.pgm', 'ab') as f:
+with open("images/test.pgm", "ab") as f:
     f.write(data)
-
-print(f"Imagen de prueba creada: {sum(1 for x in data if x > 0)} pixels blancos")
+print("Imagen sintética creada: images/test.pgm")
 PYTHON
 
-echo "=== Configuración completa ==="
-echo "Archivos creados:"
-echo "  - common/pgm.h"
-echo "  - images/test.pgm"
+# Compilar el proyecto 
+echo "Compilando con NVCC en Colab..."
+nvcc -arch=sm_75 -O2 -diag-suppress=1650 \
+    -Xcompiler="-Wno-unused-result -Wno-unused-variable" \
+    src/main.cu -o build/hough
+
+if [ $? -ne 0 ]; then
+    echo "Error en la compilación."
+    exit 1
+fi
+
+echo "Compilación exitosa."
+
+# Ejecutar los tres modos
 echo ""
-echo "Ahora puedes compilar con:"
-echo "  nvcc hough.cu -o hough -I."
-echo "  ./hough"
+echo "=== Ejecutando los 3 modos de Transformada de Hough ==="
+for mode in 0 1 2; do
+    echo "------------------------------------------------------------"
+    echo "Modo ${mode}"
+    ./build/hough ${mode}
+done
+
+echo ""
+echo "Ejecución completa. Archivos generados:"
+echo "  - build/output_lines.ppm"
+echo "  - build/input_synthetic.pgm"
+echo "  - timings_global.txt"
+echo "  - timings_constant.txt"
+echo "  - timings_const_shared.txt"
+echo "============================================================"
